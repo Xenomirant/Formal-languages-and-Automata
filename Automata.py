@@ -1,128 +1,200 @@
 from typing import Optional, Sequence, Mapping, \
     Iterable, TypeAlias
-import icecream as ic
+from icecream import ic
+import re
+from warnings import warn
+from dataclasses import dataclass
+from functools import partial
 
 PARSED: TypeAlias = (bool, int)
 
 '''
 We'll use the following grammar for RegExp
 
-<expr> ::= <term> | <term> '|' <expr>
-<term> ::= <factor> | <factor> <term>
-<factor> ::= <atom> | <atom> <meta-char>
-<atom> ::= <char> | '('<expr>')'
-<char> ::= <any-char-except-meta>
-<meta-char> ::= '?' | '*' | '+'
+A ::= B `|` A | B
+B ::= C B | C
+C := (A)|(A)+|(A)*| a | a+ | a*
 
 '''
+
+
+@dataclass
+class State(int):
+
+    def __init__(self, number: int) -> None:
+
+        self.isTerminatingState = False
+        self.name = number
+        self.Transitions = {}
+
+    @property
+    def __repr__(self) -> str:
+        return str(self.name)
+
+    def __setitem__(self, key, value):
+        self.Transitions[key] = value
+        return None
+
+    def __getitem__(self, item):
+        return self.Transitions[item]
+
 
 class NonDetAutomaton(object):
 
     def __init__(self, regex: str) -> None:
 
-        # Let -1 represent the final state
-        # let "#" represent 0-transition symbol
-
+        # let "ε" represent 0-transition symbol
+        self.zero = "ε"
 
         self.regex: str = regex
-        self.matrix: dict[int, dict[str, set[int]]] = {}
+        self.matrix: dict[State, dict[str, set[State]]] = {}
         self.__state_count: int = 0
         self.stack = []
+        self.token = "[A-Za-z0-9_]"
+        self.lookup_re = partial(self.lookup_re, re_lex=self.token)
 
-        # probably refactorize to dict of functions
-        self.__meta = ["*", "?", "+"]
+        self.__meta = {"*": self.star,
+                       "+": self.plus
+                       }
 
     @property
     def length(self):
         return len(self.regex)
 
-    def add_state(self) -> (int, int):
+    def new_state(self) -> (int, int):
         """
         Add state and return the previous one
         :return: int, previous state id,
                  int, added state id
         """
-        self.matrix[self.__state_count] = {}
+        # self.matrix[self.__state_count] = {}
         self.__state_count += 1
-        return self.__state_count - 1,  self.__state_count
+        return self.__state_count
 
-    def add_transition(self, from_state, to_state, symbol) -> None:
-        """
-        add transition from one state to another
-        :param from_state:
-        :param to_state:
-        :param symbol:
-        :return:
-        """
-        if symbol not in self.matrix[from_state]:
-            self.matrix[from_state][symbol] = set()
-        self.matrix[from_state][symbol].add(to_state)
+    def star(self, cur_state: State, added_state: State) -> State:
+        cur_state[self.zero] = added_state.name
+        pass
 
-    def lookup(self, cur_pos: int, lex: str) -> PARSED:
-        res = self.regex[cur_pos:cur_pos + len(lex)] == lex
-        return res, cur_pos + len(lex) * res
+    def plus(self):
+        pass
 
-    def expr(self, cur_pos: int) -> PARSED:
+    def cat(self):
+        pass
 
-        save = cur_pos
-        if self.length == cur_pos:
+    def A(self, cur_pos) -> (bool, int):
+
+        if cur_pos == self.length:
             return False, cur_pos
-        res_term, cur_pos = self.term(cur_pos)
-        if not res_term:
-            return False, save
+        res_b, cur_pos = self.B(cur_pos)
+        if not res_b:
+            return False, cur_pos
         if self.length == cur_pos:
             return True, cur_pos
         save = cur_pos
-        res_lex, cur_pos = self.lookup(cur_pos, "|")
-        if not res_lex:
+        check, cur_pos = self.lookup(cur_pos, "|")
+        if not check:
             return False, save
-        res_expr, cur_pos = self.expr(cur_pos)
+        res_a, cur_pos = self.A(cur_pos)
         return True, cur_pos
 
-    def term(self, cur_pos: int) -> PARSED:
+    def B(self, cur_pos) -> (bool, int):
 
+        if cur_pos == self.length:
+            return False, cur_pos
+        res_c, cur_pos = self.C(cur_pos)
+        if not res_c:
+            return False, cur_pos
+        if cur_pos == self.length:
+            return True, cur_pos
+        res_b, cur_pos = self.B(cur_pos)
+        return True, cur_pos
 
+    def C(self, cur_pos) -> (bool, int):
 
+        if cur_pos == self.length:
+            return False, cur_pos
+        ic(f"bracket start. {cur_pos}")
+        check, cur_pos = self.lookup(cur_pos, "(")
+        ic(f"bracket end. {cur_pos}")
+        ic(self.regex[cur_pos])
+        if not check:
+            res_symbol, cur_pos = self.lookup_re(cur_pos)
+            if not res_symbol:
+                return False, cur_pos
+            if cur_pos == self.length:
+                return True, cur_pos
+            ######
+            rec, cur_pos = self.lookup(cur_pos, "+")
+            if rec:
+                pass
+            rec, cur_pos = self.lookup(cur_pos, "*")
+            if rec:
+                pass
+            ######
+            return True, cur_pos
 
+        save = cur_pos
+        res_a, cur_pos = self.A(cur_pos)
+        if res_a:
+            check, cur_pos = self.lookup(cur_pos, ")")
+            if check:
+                if cur_pos == self.length:
+                    return True, cur_pos
+                #####
+                rec, cur_pos = self.lookup(cur_pos, "+")
+                if rec:
+                    pass
+                rec, cur_pos = self.lookup(cur_pos, "*")
+                if rec:
+                    pass
+                #####
+                return True, cur_pos
+        return False, save
 
+    def lookup(self, cur_pos: int, lex: str) -> PARSED:
+        res = self.regex[cur_pos:cur_pos + len(lex)] == lex
+        ic(res, cur_pos + len(lex)*res)
+        return res, cur_pos + len(lex) * res
 
-
-    # def split_by_or(self):
-    #     lstack = []
-    #     flag: int = 0
-    #
-    #     for i in range(len(self.regex)):
-    #         if self.regex[i] == "|":
-    #             self.stack.append(self.regex[:i])
-    #             flag = i+1
-    #
-    #         # check bracket balance at the first step
-    #         if self.regex[i] == "(":
-    #             lstack.append(self.regex[i])
-    #         if self.regex[i] == ")":
-    #             try:
-    #                 lstack.pop()
-    #             except IndexError:
-    #                 print("Check bracket balance!")
-    #
-    #         if flag != 0:
-    #             self.stack.append(self.regex[flag:])
-
-
+    def lookup_re(self, cur_pos, re_lex):
+        res = re.match(re_lex, self.regex[cur_pos:])
+        if res is None or res.pos != 0:
+            return False, cur_pos
+        ic(bool(res), cur_pos + res.span()[1])
+        return bool(res), cur_pos + res.span()[1]
 
     def compile(self):
 
-        if len(self.regex) == 0:
-            print("Your automata is already perfect. No need to proceed.")
+        if self.length == 0:
+            warn("Your automata is already perfect. No need to proceed.")
+            return None
 
-        pass
+        if self.zero in self.regex:
+            raise ValueError("Control character in string. Can't proceed")
 
+        # check bracket balance at the first step
+        lstack = []
+        for i in range(self.length):
 
+            if self.regex[i] == "(":
+                lstack.append(self.regex[i])
+            if self.regex[i] == ")":
+                try:
+                    lstack.pop()
+                except IndexError:
+                    print("Check bracket balance!")
+
+        res, cur_pos = self.A(0)
+        if cur_pos != self.length:
+            raise ValueError("Your string doesn't satisfy the grammar. Check again.")
+
+        return None
 
 
 def main():
-
-    m = NonDetAutomaton("a*b+C|c|C?")
+    regex = "a*b+C|c+|C+"
+    print(len(regex))
+    m = NonDetAutomaton(regex)
     m.compile()
 
 
