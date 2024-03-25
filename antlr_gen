@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cd antlr_grammars
+antlr4 -Dlanguage=Python3 -o outputs "$1"
